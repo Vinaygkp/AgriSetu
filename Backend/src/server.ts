@@ -1,7 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
-import mongoose from 'mongoose'
+import mongoose, { Document } from 'mongoose'
 import dns from 'dns'
 import axios from 'axios'
 import nodemailer from 'nodemailer'
@@ -21,16 +21,43 @@ app.use(cors())
 app.use(express.json())
 
 /* ── NODEMAILER TRANSPORTER SETUP ── */
+const EMAIL_USER = process.env.EMAIL_USER || ''
+const EMAIL_PASS = process.env.EMAIL_PASS || ''
+
 const transporter = nodemailer.createTransport({
   service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true,
   auth: {
-    user: process.env.EMAIL_USER || 'your_email@gmail.com',
-    pass: process.env.EMAIL_PASS || 'your_app_password'
+    user: EMAIL_USER,
+    pass: EMAIL_PASS
   }
 })
 
-/* ── USER AUTH SCHEMA & MODEL ── */
-const userSchema = new mongoose.Schema({
+// Nodemailer SMTP Verification Check
+transporter.verify((error) => {
+  if (error) {
+    console.error('❌ Nodemailer SMTP Verification Error (Check EMAIL_USER / EMAIL_PASS):', error.message)
+  } else {
+    console.log('📧 Nodemailer Transporter is Ready to send OTP Emails!')
+  }
+})
+
+/* ── USER AUTH INTERFACE & MODEL (Fixes ts(2353) Error) ── */
+interface IUser extends Document {
+  name: string
+  email: string
+  password: string
+  phone?: string
+  location?: string
+  farmName?: string
+  otp?: string
+  otpExpires?: Date
+  isVerified?: boolean
+}
+
+const userSchema = new mongoose.Schema<IUser>({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
@@ -42,7 +69,7 @@ const userSchema = new mongoose.Schema({
   isVerified: { type: Boolean, default: false }
 }, { timestamps: true })
 
-const User = mongoose.models.User || mongoose.model('User', userSchema)
+const User = (mongoose.models.User as mongoose.Model<IUser>) || mongoose.model<IUser>('User', userSchema)
 
 // Base Route Test
 app.get('/', (req, res) => {
@@ -85,16 +112,25 @@ app.post('/api/user/register-send-otp', async (req, res) => {
     }
 
     await transporter.sendMail({
-      from: '"AgroVision Support" <agrovision@gmail.com>',
+      from: `"AgroVision Support" <${EMAIL_USER}>`,
       to: email,
       subject: 'Your AgroVision Registration OTP',
-      text: `Your Registration OTP is: ${otp}. It is valid for 10 minutes.`
+      text: `Your Registration OTP is: ${otp}. It is valid for 10 minutes.`,
+      html: `
+        <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #05070A; color: #F0FFF4; border-radius: 10px;">
+          <h2 style="color: #18C964;">AgroVision Registration OTP</h2>
+          <p>Your One-Time Password for registration is:</p>
+          <h1 style="color: #00D4FF; letter-spacing: 4px;">${otp}</h1>
+          <p style="color: #8BA89D; font-size: 12px;">This code is valid for 10 minutes. Do not share it with anyone.</p>
+        </div>
+      `
     })
 
+    console.log(`✅ OTP ${otp} successfully sent to ${email}`)
     res.json({ success: true, message: 'OTP sent to your email for registration!' })
-  } catch (err) {
-    console.error('Register OTP Error:', err)
-    res.status(500).json({ error: 'Failed to send registration OTP' })
+  } catch (err: any) {
+    console.error('❌ Register OTP Send Failure Error:', err.message || err)
+    res.status(500).json({ error: 'Failed to send registration OTP. Check server logs.' })
   }
 })
 
@@ -163,15 +199,24 @@ app.post('/api/user/send-otp', async (req, res) => {
     }
 
     await transporter.sendMail({
-      from: '"AgroVision Support" <agrovision@gmail.com>',
+      from: `"AgroVision Support" <${EMAIL_USER}>`,
       to: email,
       subject: 'Your AgroVision Login OTP',
-      text: `Your One-Time Password (OTP) for AgroVision is: ${otp}. It is valid for 10 minutes.`
+      text: `Your One-Time Password (OTP) for AgroVision is: ${otp}. It is valid for 10 minutes.`,
+      html: `
+        <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #05070A; color: #F0FFF4; border-radius: 10px;">
+          <h2 style="color: #18C964;">AgroVision Login OTP</h2>
+          <p>Your One-Time Password for login is:</p>
+          <h1 style="color: #00D4FF; letter-spacing: 4px;">${otp}</h1>
+          <p style="color: #8BA89D; font-size: 12px;">This code is valid for 10 minutes.</p>
+        </div>
+      `
     })
 
+    console.log(`✅ Login OTP ${otp} sent to ${email}`)
     res.json({ success: true, message: 'OTP sent successfully to your email!' })
-  } catch (err) {
-    console.error('OTP Send Error:', err)
+  } catch (err: any) {
+    console.error('❌ Login OTP Send Failure Error:', err.message || err)
     res.status(500).json({ error: 'Failed to send OTP email' })
   }
 })
@@ -290,7 +335,7 @@ app.patch('/api/alerts/:id/resolve', async (req, res) => {
 /* ── WEATHER API ROUTE ── */
 app.get('/api/weather', async (req, res) => {
   try {
-    const city = req.query.location || 'New Delhi'
+    const city = (req.query.location as string) || 'New Delhi'
     const apiKey = process.env.OPENWEATHER_API_KEY
 
     if (!apiKey) {
@@ -311,7 +356,7 @@ app.get('/api/weather', async (req, res) => {
   }
 })
 
-/* ── LOCAL SMART AI ADVISOR ENGINE (NO EXTERNAL API / ZERO ERRORS) ── */
+/* ── LOCAL SMART AI ADVISOR ENGINE ── */
 function getLocalSmartAdvice(crop: string, moisture: number, temp: number): string {
   const cropName = crop || 'Wheat'
   let advicePoints: string[] = []
@@ -325,7 +370,7 @@ function getLocalSmartAdvice(crop: string, moisture: number, temp: number): stri
   }
 
   if (temp > 32) {
-    advicePoints.push(`• High ambient temperature (${temp}°C). Apply shade netting and consider early morning micro-sprINKling.`)
+    advicePoints.push(`• High ambient temperature (${temp}°C). Apply shade netting and consider early morning micro-sprinkling.`)
   } else if (temp < 15) {
     advicePoints.push(`• Low temperature alert (${temp}°C). Monitor soil warmth and delay nitrogen fertilizer application.`)
   } else {
