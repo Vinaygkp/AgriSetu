@@ -1,7 +1,7 @@
 import axios from 'axios'
 import * as mockImports from '../data/mockData'
 
-const API_BASE_URL = 'https://agrisetu1.onrender.com/api'
+export const API_BASE_URL = 'https://agrisetu1.onrender.com/api'
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
