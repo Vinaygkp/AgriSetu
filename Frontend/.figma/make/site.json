@@ -1,0 +1,10 @@
+{
+  "description": "Transform agricultural sensor data into actionable insights with stunning visual analytics, empowering farmers to enhance productivity and decision-making.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
