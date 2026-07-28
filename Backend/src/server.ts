@@ -1,7 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
-import mongoose, { Document } from 'mongoose'
+import mongoose from 'mongoose'
 import dns from 'dns'
 import axios from 'axios'
 import nodemailer from 'nodemailer'
@@ -17,7 +17,12 @@ const PORT = process.env.PORT || 5000
 
 const MONGO_URI = process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://localhost:27017/agrovision'
 
-app.use(cors())
+// 💡 Enable full CORS access for frontend apps
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}))
 app.use(express.json())
 
 /* ── NODEMAILER TRANSPORTER SETUP ── */
@@ -31,21 +36,27 @@ const transporter = nodemailer.createTransport({
   secure: true,
   auth: {
     user: EMAIL_USER,
-    pass: EMAIL_PASS
-  }
+    pass: EMAIL_PASS, // 💡 Ensure .env has NO SPACES (e.g., upktzxanurwzholx)
+  },
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 15000,
+  tls: {
+    rejectUnauthorized: false,
+  },
 })
 
-// Nodemailer SMTP Verification Check
+// Startup par hi Transporter verify kar lo
 transporter.verify((error) => {
   if (error) {
-    console.error('❌ Nodemailer SMTP Verification Error (Check EMAIL_USER / EMAIL_PASS):', error.message)
+    console.error('❌ Nodemailer SMTP Error:', error.message)
   } else {
-    console.log('📧 Nodemailer Transporter is Ready to send OTP Emails!')
+    console.log('⚡ Nodemailer is ready to send OTP emails!')
   }
 })
 
-/* ── USER AUTH INTERFACE & MODEL (Fixes ts(2353) Error) ── */
-interface IUser extends Document {
+/* ── USER AUTH INTERFACE & SCHEMA ── */
+interface IUser {
   name: string
   email: string
   password: string
@@ -57,23 +68,26 @@ interface IUser extends Document {
   isVerified?: boolean
 }
 
-const userSchema = new mongoose.Schema<IUser>({
-  name: { type: String, required: true },
-  email: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
-  phone: { type: String, default: '' },
-  location: { type: String, default: '' },
-  farmName: { type: String, default: 'My Farm' },
-  otp: { type: String, default: '' },
-  otpExpires: { type: Date },
-  isVerified: { type: Boolean, default: false }
-}, { timestamps: true })
+const userSchema = new mongoose.Schema<IUser>(
+  {
+    name: { type: String, required: true },
+    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    password: { type: String, required: true },
+    phone: { type: String, default: '' },
+    location: { type: String, default: '' },
+    farmName: { type: String, default: 'My Farm' },
+    otp: { type: String, default: '' },
+    otpExpires: { type: Date },
+    isVerified: { type: Boolean, default: false },
+  },
+  { timestamps: true }
+)
 
 const User = (mongoose.models.User as mongoose.Model<IUser>) || mongoose.model<IUser>('User', userSchema)
 
 // Base Route Test
 app.get('/', (req, res) => {
-  res.send({ status: 'AgroVision Backend Running 🚀' })
+  res.send({ status: 'AgriSetu Backend Running 🚀' })
 })
 
 /* ── AUTH & OTP API ROUTES ── */
@@ -81,10 +95,11 @@ app.get('/', (req, res) => {
 // 1. REGISTER SEND OTP
 app.post('/api/user/register-send-otp', async (req, res) => {
   try {
-    const { email } = req.body
+    let { email } = req.body
     if (!email) {
       return res.status(400).json({ error: 'Email is required' })
     }
+    email = email.trim().toLowerCase()
 
     const existingUser = await User.findOne({ email, isVerified: true })
     if (existingUser) {
@@ -106,42 +121,34 @@ app.post('/api/user/register-send-otp', async (req, res) => {
         password: 'TEMP_PASSWORD',
         otp,
         otpExpires,
-        isVerified: false
+        isVerified: false,
       })
       await user.save()
     }
 
     await transporter.sendMail({
-      from: `"AgroVision Support" <${EMAIL_USER}>`,
+      from: `"AgriSetu Support" <${EMAIL_USER}>`,
       to: email,
-      subject: 'Your AgroVision Registration OTP',
+      subject: 'Your AgriSetu Registration OTP',
       text: `Your Registration OTP is: ${otp}. It is valid for 10 minutes.`,
-      html: `
-        <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #05070A; color: #F0FFF4; border-radius: 10px;">
-          <h2 style="color: #18C964;">AgroVision Registration OTP</h2>
-          <p>Your One-Time Password for registration is:</p>
-          <h1 style="color: #00D4FF; letter-spacing: 4px;">${otp}</h1>
-          <p style="color: #8BA89D; font-size: 12px;">This code is valid for 10 minutes. Do not share it with anyone.</p>
-        </div>
-      `
     })
 
-    console.log(`✅ OTP ${otp} successfully sent to ${email}`)
-    res.json({ success: true, message: 'OTP sent to your email for registration!' })
+    return res.json({ success: true, message: 'OTP sent to your email for registration!' })
   } catch (err: any) {
-    console.error('❌ Register OTP Send Failure Error:', err.message || err)
-    res.status(500).json({ error: 'Failed to send registration OTP. Check server logs.' })
+    console.error('Register OTP Error:', err)
+    return res.status(500).json({ error: err.message || 'Failed to send registration OTP' })
   }
 })
 
 // 2. VERIFY REGISTER OTP & SAVE DETAILS
 app.post('/api/user/verify-register', async (req, res) => {
   try {
-    const { name, email, password, phone, location, otp } = req.body
+    let { name, email, password, phone, location, otp } = req.body
 
     if (!email || !otp || !name || !password) {
       return res.status(400).json({ error: 'All fields including OTP are required' })
     }
+    email = email.trim().toLowerCase()
 
     const user = await User.findOne({ email })
     if (!user) {
@@ -161,30 +168,31 @@ app.post('/api/user/verify-register', async (req, res) => {
     user.isVerified = true
     await user.save()
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: 'Account registered and verified successfully!',
-      user: { 
-        id: user._id, 
-        name: user.name, 
-        email: user.email, 
-        phone: user.phone, 
-        location: user.location 
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        location: user.location,
       },
-      token: `token_${user._id}`
+      token: `token_${user._id}`,
     })
   } catch (err) {
-    res.status(500).json({ error: 'Registration verification failed' })
+    return res.status(500).json({ error: 'Registration verification failed' })
   }
 })
 
 // 3. LOGIN SEND OTP
 app.post('/api/user/send-otp', async (req, res) => {
   try {
-    const { email } = req.body
+    let { email } = req.body
     if (!email) {
       return res.status(400).json({ error: 'Email is required' })
     }
+    email = email.trim().toLowerCase()
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString()
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000)
@@ -199,67 +207,60 @@ app.post('/api/user/send-otp', async (req, res) => {
     }
 
     await transporter.sendMail({
-      from: `"AgroVision Support" <${EMAIL_USER}>`,
+      from: `"AgriSetu Support" <${EMAIL_USER}>`,
       to: email,
-      subject: 'Your AgroVision Login OTP',
-      text: `Your One-Time Password (OTP) for AgroVision is: ${otp}. It is valid for 10 minutes.`,
-      html: `
-        <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #05070A; color: #F0FFF4; border-radius: 10px;">
-          <h2 style="color: #18C964;">AgroVision Login OTP</h2>
-          <p>Your One-Time Password for login is:</p>
-          <h1 style="color: #00D4FF; letter-spacing: 4px;">${otp}</h1>
-          <p style="color: #8BA89D; font-size: 12px;">This code is valid for 10 minutes.</p>
-        </div>
-      `
+      subject: 'Your AgriSetu Login OTP',
+      text: `Your One-Time Password (OTP) for AgriSetu is: ${otp}. It is valid for 10 minutes.`,
     })
 
-    console.log(`✅ Login OTP ${otp} sent to ${email}`)
-    res.json({ success: true, message: 'OTP sent successfully to your email!' })
+    return res.json({ success: true, message: 'OTP sent successfully to your email!' })
   } catch (err: any) {
-    console.error('❌ Login OTP Send Failure Error:', err.message || err)
-    res.status(500).json({ error: 'Failed to send OTP email' })
+    console.error('OTP Send Error:', err)
+    return res.status(500).json({ error: err.message || 'Failed to send OTP email' })
   }
 })
 
 // 4. LOGIN WITH PASSWORD
 app.post('/api/user/login', async (req, res) => {
   try {
-    const { email, password } = req.body
+    let { email, password } = req.body
 
     if (!email || !password) {
       return res.status(400).json({ error: 'Please enter email and password' })
     }
+    email = email.trim().toLowerCase()
 
     const user = await User.findOne({ email, password, isVerified: true })
     if (!user) {
       return res.status(401).json({ error: 'Invalid email or password' })
     }
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Logged in successfully!',
-      user: { 
-        id: user._id, 
-        name: user.name, 
-        email: user.email, 
-        phone: user.phone || '', 
-        location: user.location || '' 
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone || '',
+        location: user.location || '',
       },
-      token: `token_${user._id}`
+      token: `token_${user._id}`,
     })
   } catch (err) {
-    res.status(500).json({ error: 'Login failed' })
+    return res.status(500).json({ error: 'Login failed' })
   }
 })
 
 // 5. VERIFY OTP & LOGIN
 app.post('/api/user/verify-otp', async (req, res) => {
   try {
-    const { email, otp } = req.body
+    let { email, otp } = req.body
 
     if (!email || !otp) {
       return res.status(400).json({ error: 'Email and OTP are required' })
     }
+    email = email.trim().toLowerCase()
 
     const user = await User.findOne({ email })
     if (!user) {
@@ -274,20 +275,20 @@ app.post('/api/user/verify-otp', async (req, res) => {
     user.otpExpires = undefined
     await user.save()
 
-    res.json({
+    return res.json({
       success: true,
       message: 'OTP verified & Logged in successfully!',
-      user: { 
-        id: user._id, 
-        name: user.name, 
-        email: user.email, 
-        phone: user.phone || '', 
-        location: user.location || '' 
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone || '',
+        location: user.location || '',
       },
-      token: `token_${user._id}`
+      token: `token_${user._id}`,
     })
   } catch (err) {
-    res.status(500).json({ error: 'OTP verification failed' })
+    return res.status(500).json({ error: 'OTP verification failed' })
   }
 })
 
@@ -393,18 +394,18 @@ app.post('/api/ai/analyze', (req, res) => {
     res.json({ advice: adviceText })
   } catch (err) {
     res.json({
-      advice: '• Increase soil irrigation by 15% during morning hours.\n• Monitor Nitrogen fertilizer levels to boost yield.'
+      advice: '• Increase soil irrigation by 15% during morning hours.\n• Monitor Nitrogen fertilizer levels to boost yield.',
     })
   }
 })
 
 // MongoDB Connection
 mongoose.connect(MONGO_URI, {
-  dbName: 'AgroVisionDB'
+  dbName: 'AgroVisionDB',
 })
 .then(() => console.log('🍃 Connected to MongoDB Databases via DNS Fix!'))
 .catch((err) => console.error('❌ MongoDB Connection Error:', err))
 
 app.listen(PORT, () => {
-  console.log(`✅ AgroVision Server running on http://localhost:${PORT}`)
+  console.log(`✅ AgriSetu Server running on http://localhost:${PORT}`)
 })
