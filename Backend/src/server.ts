@@ -27,7 +27,9 @@ app.use(express.json())
 
 /* ── NODEMAILER TRANSPORTER SETUP ── */
 const EMAIL_USER = process.env.EMAIL_USER || ''
-const EMAIL_PASS = process.env.EMAIL_PASS || ''
+const RAW_EMAIL_PASS = process.env.EMAIL_PASS || ''
+// 💡 Auto-strip all spaces from App Password (e.g. "upkt zxan urwz holx" -> "upktzxanurwzholx")
+const EMAIL_PASS = RAW_EMAIL_PASS.replace(/\s+/g, '')
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -36,7 +38,7 @@ const transporter = nodemailer.createTransport({
   secure: true,
   auth: {
     user: EMAIL_USER,
-    pass: EMAIL_PASS, // 💡 Ensure .env has NO SPACES (e.g., upktzxanurwzholx)
+    pass: EMAIL_PASS,
   },
   connectionTimeout: 10000,
   greetingTimeout: 10000,
@@ -49,7 +51,7 @@ const transporter = nodemailer.createTransport({
 // Startup par hi Transporter verify kar lo
 transporter.verify((error) => {
   if (error) {
-    console.error('❌ Nodemailer SMTP Error:', error.message)
+    console.error('❌ Nodemailer SMTP Verification Error:', error.message)
   } else {
     console.log('⚡ Nodemailer is ready to send OTP emails!')
   }
