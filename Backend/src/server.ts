@@ -4,7 +4,7 @@ import dotenv from 'dotenv'
 import mongoose from 'mongoose'
 import dns from 'dns'
 import axios from 'axios'
-import { Resend } from 'resend'
+import nodemailer from 'nodemailer'
 import { Field, Sensor, Alert } from './models'
 
 // Direct Google & Cloudflare DNS set kar rahe hain SRV query error bypass karne ke liye
@@ -25,23 +25,35 @@ app.use(cors({
 }))
 app.use(express.json())
 
-/* ── RESEND EMAIL SETUP (Fast HTTP API - No Socket Hangs) ── */
-const resend = new Resend(process.env.RESEND_API_KEY || '')
+/* ── NODEMAILER TRANSPORTER SETUP (PORT 587 FOR RENDER) ── */
+const EMAIL_USER = process.env.EMAIL_USER || 'vinay555ti@gmail.com'
+const RAW_EMAIL_PASS = process.env.EMAIL_PASS || ''
+const EMAIL_PASS = RAW_EMAIL_PASS.replace(/\s+/g, '') // Auto-remove spaces
 
-// Helper function to send email via HTTP REST
-const sendOtpEmailHelper = async (toEmail: string, otp: string, subject: string) => {
-  return await resend.emails.send({
-    from: 'AgriSetu <onboarding@resend.dev>', // Resend testing domain
-    to: [toEmail],
-    subject: subject,
-    html: `<div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
-            <h2 style="color: #10b981;">AgriSetu Verification</h2>
-            <p style="font-size: 16px;">Your One-Time Password (OTP) is:</p>
-            <p style="font-size: 28px; font-weight: bold; color: #059669; letter-spacing: 4px;">${otp}</p>
-            <p style="font-size: 14px; color: #6b7280;">This OTP is valid for 10 minutes.</p>
-           </div>`,
-  })
-}
+const transporter = nodemailer.createTransport({
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false, // Port 587 uses STARTTLS
+  auth: {
+    user: EMAIL_USER,
+    pass: EMAIL_PASS,
+  },
+  connectionTimeout: 15000,
+  greetingTimeout: 15000,
+  socketTimeout: 20000,
+  tls: {
+    rejectUnauthorized: false,
+  },
+})
+
+// Startup Verification
+transporter.verify((error) => {
+  if (error) {
+    console.error('❌ Nodemailer SMTP Verification Error:', error.message)
+  } else {
+    console.log('⚡ Nodemailer is ready on Port 587 to send OTP emails!')
+  }
+})
 
 /* ── USER AUTH INTERFACE & SCHEMA ── */
 interface IUser {
@@ -114,7 +126,12 @@ app.post('/api/user/register-send-otp', async (req, res) => {
       await user.save()
     }
 
-    await sendOtpEmailHelper(email, otp, 'Your AgriSetu Registration OTP')
+    await transporter.sendMail({
+      from: `"AgriSetu Support" <${EMAIL_USER}>`,
+      to: email,
+      subject: 'Your AgriSetu Registration OTP',
+      text: `Your Registration OTP is: ${otp}. It is valid for 10 minutes.`,
+    })
 
     return res.json({ success: true, message: 'OTP sent to your email for registration!' })
   } catch (err: any) {
@@ -189,7 +206,12 @@ app.post('/api/user/send-otp', async (req, res) => {
       return res.status(404).json({ error: 'User not found. Please register first.' })
     }
 
-    await sendOtpEmailHelper(email, otp, 'Your AgriSetu Login OTP')
+    await transporter.sendMail({
+      from: `"AgriSetu Support" <${EMAIL_USER}>`,
+      to: email,
+      subject: 'Your AgriSetu Login OTP',
+      text: `Your One-Time Password (OTP) for AgriSetu is: ${otp}. It is valid for 10 minutes.`,
+    })
 
     return res.json({ success: true, message: 'OTP sent successfully to your email!' })
   } catch (err: any) {
