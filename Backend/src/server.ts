@@ -4,6 +4,7 @@ import dotenv from 'dotenv'
 import mongoose from 'mongoose'
 import dns from 'dns'
 import axios from 'axios'
+import { Resend } from 'resend'
 import { Field, Sensor, Alert } from './models'
 
 // Direct Google & Cloudflare DNS set kar rahe hain SRV query error bypass karne ke liye
@@ -24,50 +25,21 @@ app.use(cors({
 }))
 app.use(express.json())
 
-/* ── BREVO HTTP EMAIL HELPER (WORKS ON RENDER & SENDS TO ANY EMAIL) ── */
-const EMAIL_USER = process.env.EMAIL_USER || 'vinay555ti@gmail.com'
-const BREVO_API_KEY = process.env.BREVO_API_KEY || '' // Get free key from brevo.com if using API Key or fallback HTTP
+/* ── RESEND EMAIL SETUP (Fast HTTP REST API - No Socket Timeout) ── */
+const resend = new Resend(process.env.RESEND_API_KEY || '')
 
 const sendOtpEmailHelper = async (toEmail: string, otp: string, subject: string) => {
-  // If Brevo API Key is present, send via Brevo HTTP API (Fastest & Reliable)
-  if (BREVO_API_KEY) {
-    return await axios.post(
-      'https://api.brevo.com/v3/smtp/email',
-      {
-        sender: { name: 'AgriSetu Support', email: EMAIL_USER },
-        to: [{ email: toEmail }],
-        subject: subject,
-        htmlContent: `<div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
-                        <h2 style="color: #10b981;">AgriSetu Verification</h2>
-                        <p style="font-size: 16px;">Your One-Time Password (OTP) is:</p>
-                        <p style="font-size: 28px; font-weight: bold; color: #059669; letter-spacing: 4px;">${otp}</p>
-                        <p style="font-size: 14px; color: #6b7280;">This OTP is valid for 10 minutes.</p>
-                      </div>`
-      },
-      {
-        headers: {
-          'api-key': BREVO_API_KEY,
-          'Content-Type': 'application/json',
-          'accept': 'application/json'
-        },
-        timeout: 10000
-      }
-    )
-  }
-
-  // Fallback Resend HTTP API Call if RESEND_API_KEY is defined
-  if (process.env.RESEND_API_KEY) {
-    const { Resend } = require('resend')
-    const resend = new Resend(process.env.RESEND_API_KEY)
-    return await resend.emails.send({
-      from: 'AgriSetu <onboarding@resend.dev>',
-      to: [toEmail],
-      subject: subject,
-      html: `<p>Your OTP is <b>${otp}</b></p>`
-    })
-  }
-
-  throw new Error('No valid Email API Key found in Environment (BREVO_API_KEY or RESEND_API_KEY)')
+  return await resend.emails.send({
+    from: 'AgriSetu <onboarding@resend.dev>', // Resend default domain
+    to: [toEmail],
+    subject: subject,
+    html: `<div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
+            <h2 style="color: #10b981;">AgriSetu Verification</h2>
+            <p style="font-size: 16px;">Your One-Time Password (OTP) is:</p>
+            <p style="font-size: 28px; font-weight: bold; color: #059669; letter-spacing: 4px;">${otp}</p>
+            <p style="font-size: 14px; color: #6b7280;">This OTP is valid for 10 minutes.</p>
+           </div>`,
+  })
 }
 
 /* ── USER AUTH INTERFACE & SCHEMA ── */
