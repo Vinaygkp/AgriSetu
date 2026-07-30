@@ -4,7 +4,6 @@ import dotenv from 'dotenv'
 import mongoose from 'mongoose'
 import dns from 'dns'
 import axios from 'axios'
-import { Resend } from 'resend'
 import { Field, Sensor, Alert } from './models'
 
 // Direct Google & Cloudflare DNS set kar rahe hain SRV query error bypass karne ke liye
@@ -25,21 +24,23 @@ app.use(cors({
 }))
 app.use(express.json())
 
-/* ── RESEND EMAIL SETUP (Fast HTTP REST API - No Socket Timeout) ── */
-const resend = new Resend(process.env.RESEND_API_KEY || '')
-
+/* ── GOOGLE APPS SCRIPT WEBHOOK EMAIL HELPER (FREE & SENDS TO ALL EMAILS) ── */
 const sendOtpEmailHelper = async (toEmail: string, otp: string, subject: string) => {
-  return await resend.emails.send({
-    from: 'AgriSetu <onboarding@resend.dev>', // Resend default domain
-    to: [toEmail],
-    subject: subject,
-    html: `<div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
-            <h2 style="color: #10b981;">AgriSetu Verification</h2>
-            <p style="font-size: 16px;">Your One-Time Password (OTP) is:</p>
-            <p style="font-size: 28px; font-weight: bold; color: #059669; letter-spacing: 4px;">${otp}</p>
-            <p style="font-size: 14px; color: #6b7280;">This OTP is valid for 10 minutes.</p>
-           </div>`,
-  })
+  const webhookUrl = process.env.GOOGLE_WEBHOOK_URL || ''
+
+  if (!webhookUrl) {
+    throw new Error('GOOGLE_WEBHOOK_URL is missing in environment variables!')
+  }
+
+  return await axios.post(
+    webhookUrl,
+    {
+      to: toEmail,
+      otp: otp,
+      subject: subject,
+    },
+    { timeout: 10000 }
+  )
 }
 
 /* ── USER AUTH INTERFACE & SCHEMA ── */
@@ -117,7 +118,7 @@ app.post('/api/user/register-send-otp', async (req, res) => {
 
     return res.json({ success: true, message: 'OTP sent to your email for registration!' })
   } catch (err: any) {
-    console.error('Register OTP Error:', err)
+    console.error('Register OTP Error:', err?.response?.data || err.message)
     return res.status(500).json({ error: err.message || 'Failed to send registration OTP' })
   }
 })
@@ -192,7 +193,7 @@ app.post('/api/user/send-otp', async (req, res) => {
 
     return res.json({ success: true, message: 'OTP sent successfully to your email!' })
   } catch (err: any) {
-    console.error('OTP Send Error:', err)
+    console.error('OTP Send Error:', err?.response?.data || err.message)
     return res.status(500).json({ error: err.message || 'Failed to send OTP email' })
   }
 })
